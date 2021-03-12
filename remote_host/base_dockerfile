@@ -1,0 +1,47 @@
+FROM ubuntu:20.04
+
+RUN apt update \
+    && apt upgrade -y \
+    && apt install -y curl \
+    && apt install -y vim \
+    && apt install -y openssh-server \
+    && apt install -y git \
+    && apt install -y libpq-dev \
+    && export PATH=$PATH:/root/.local/bin
+
+ENV DISPLAY=:99
+
+# Password for the user.
+COPY ./secrets/password /tmp/password
+
+RUN useradd remote_user \
+    && echo "remote_user:$( cat /tmp/password )" | chpasswd \
+    && rm /tmp/password \
+    && mkdir /home/remote_user/.ssh -p \
+    && mkdir /home/remote_user/secrets \
+    && chmod 700 /home/remote_user/.ssh \
+    && mkdir -p -m0755 /var/run/sshd
+
+# May need to run the `regen_ssh_keys.sh` script to generate the keys if it
+# does not exist.
+COPY ./secrets/remote-key-rsa.pub /home/remote_user/.ssh/authorized_keys
+
+# Copy the web environment variables.
+COPY ./secrets/.web.env /home/remote_user/secrets/.web.env
+
+# Git keys setup
+COPY ./secrets/github /home/remote_user/.ssh/github
+COPY ./secrets/github.pub /home/remote_user/.ssh/github.pub
+
+# Prevents SSH agent from asking to confirm if we want to add the key.
+RUN printf "HOST github.com\n\tStrictHostKeyChecking no" >> /home/remote_user/.ssh/config
+
+RUN chown remote_user:remote_user   -R /home/remote_user && \
+    chmod 400 /home/remote_user/.ssh/authorized_keys
+
+CMD /usr/sbin/sshd -D
+
+# Create a static_files directory at the root giving ownership to remote_user
+# This directory is used by the web application when collecting static files.
+RUN mkdir /static_files && \
+    chown remote_user:remote_user -R /static_files/
