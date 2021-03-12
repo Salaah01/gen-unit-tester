@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+    jenkins:
+        build: ./jenkins/.
+        ports:
+            - 8090:8080
+        volumes:
+            - jenkins:/var/jenkins_home/
+
+    remote-host:
+        build: ./remote-host/.
+        volumes:
+            - jenkins:/home/remote_user/jenkins/
+            - ./remote-host/jobs/:/home/remote_user/jobs/
+
+volumes:
+    jenkins:

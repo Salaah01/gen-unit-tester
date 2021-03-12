@@ -10,5 +10,5 @@ RUN apt-get install ssh -y \
     && service ssh start 
 
 EXPOSE 22 
-   
+
 USER jenkins
