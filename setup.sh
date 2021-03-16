@@ -1,6 +1,7 @@
 #!/bin/bash
 
-DOCKERFILE_PATH=./remote_host/Dockerfile
+BASE_DIR=$(dirname $BASH_SOURCE[0])
+DOCKERFILE_PATH="${BASE_DIR}/remote_host/Dockerfile"
 
 # Make a copy of the docker-compose base file.
 if [[ -f $DOCKERFILE_PATH ]]; then
@@ -17,49 +18,52 @@ cp ./remote_host/base_dockerfile $DOCKERFILE_PATH
 # Git setup.
 read -p "Git email: " git_email
 read -p "Git name: " git_password
-read -p "Git ssh file path (leave empty to skip): " git_ssh_path
+read -p "Git SSH secret key path (leave empty to skip): " git_ssh_pk
 
 echo -e "\nRUN git config --global user.email \"${git_email}\" \\" >>$DOCKERFILE_PATH
-echo -e "\tgit config --global user.name \"${git_password}\"" >>$DOCKERFILE_PATH
+echo -e "\t&& git config --global user.name \"${git_password}\"" >>$DOCKERFILE_PATH
 
-if [[ ! -z "${git_ssh_path}" ]]; then
-  echo -e "RUN eval \$(ssh-agent -s) && ssh-add \"${git_ssh_path}\"" >>$DOCKERFILE_PATH
+# If the git SSH secret key path has been set, then copy the file along
+# with the corresponding public key into the secrets directory and write
+# instruction on the Dockerfile add the SSH keys.
+if [[ ! -z "${git_ssh_pk}" ]]; then
+  ssh_pk_filename=$(basename $git_ssh_pk)
+  
+  cp "${git_ssh_pk}" "${BASH_DIR}/remote_host/secrets/."
+  cp "${git_ssh_pk}.pub" "${BASH_DIR}/remote_host/secrets/."
+  
+  echo -e "COPY ./secrets/${ssh_pk_filename} /home/remote_user/.ssh/${ssh_pk_filename}"
+  echo -e "COPY ./secrets/${ssh_pk_filename}.pub /home/remote_user/.ssh/${ssh_pk_filename}.pub"
+  
+  echo -e "RUN eval \$(ssh-agent -s)\n">>$DOCKERFILE_PATH
+  echo -e "\tssh-add /home/remote_user/.ssh/${ssh_pk_filename}" 
 fi
+
+# Setting up secret keys
+mkdir -p -m700 remote_host/secrets
+
+# Creates an SSH key that can be used to SSH into the remote_user for jenkins.
+gen_ssh_key=1
+if [[ ! -z "${BASE_DIR}/remote_host/secrets/remote-key-rsa" ]]; then
+  read -p 'SSH key for jenkins to SSH into remote-host exists, recreate key (y)? [y/N]' regen_ssh_key
+  if [[ ! "${regen_ssh_key,,}" =~ ^(y)|(yes)$ ]]; then   
+    gen_ssh_key=0
+  fi
+fi
+
+if [[ $gen_ssh_key -eq 1 ]]; then
+  ssh-keygen -t rsa -f "${BASE_DIR}/remote_host/secrets/remote-key-rsa" -m PEM
+  chmod 600 "${BASE_DIR}/remote_host/secrets/remote-key-rsa"
+fi
+
+# Remote user password
+read -p "Set password for remote_user: " password
+if [[ -z "${password}" ]]; then
+  echo -e "\033[0;31mRemote user password was not set, exiting...\033[0m"
+  exit 2
+fi
+echo "${password}" >"${BASE_DIR}/remote_host/secrets/.password"
+chmod 600 "${BASE_DIR}/remote_host/secrets/.password"
 
 # Install additional packages.
-# Python
-read -p "Install python3 (y)? [y/n]: " install
-if [[ -z "${install}" || "${install,,}" =~ ^(y)|(yes)$ ]]; then
-  echo -e "\n# Python 3" >>$DOCKERFILE_PATH
-  echo -e "RUN apt install -y python3.9 \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& apt install python3.9-dev \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& rm /usr/bin/python3 \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& ln -s python3.9 /usr/bin/python3 \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& apt install -y python3-pip \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& pip3 install --upgrade pip \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& apt install python3.9-venv \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& python3 -m pip install --user virtualenv" >>$DOCKERFILE_PATH
-fi
-
-# Node
-install=""
-read -p "Install node (y)? [y/N]: " install
-if [[ -z "${install}" || "${install,,}" =~ ^(y)|(yes)$ ]]; then
-  echo -e "\n# Node" >>$DOCKERFILE_PATH
-  echo -e "RUN curl -sL https://deb.nodesource.com/setup_14.x | bash - \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& apt install -y nodejs" >>$DOCKERFILE_PATH
-fi
-
-# Selenium
-install="" >>$DOCKERFILE_PATH
-read -p "Install selenium (y) [y/N]: " Install
-if [[ -z "${install}" || "${install,,}" =~ ^(y)|(yes)$ ]]; then
-  echo -e "\n# Selenium" >>$DOCKERFILE_PATH
-  echo -e "RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list' \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& apt -y update \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& apt install -y google-chrome-stable \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& apt install -yqq unzip \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& wget -O /tmp/chromedriver.zip http://chromedriver.storage.googleapis.com/$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE)/chromedriver_linux64.zip \\" >>$DOCKERFILE_PATH
-  echo -e "\t&& unzip /tmp/chromedriver.zip chromedriver -d /usr/local/bin/" >>$DOCKERFILE_PATH
-fi
+bash "${BASE_DIR}/setup_pkg_installs.sh" $DOCKERFILE_PATH

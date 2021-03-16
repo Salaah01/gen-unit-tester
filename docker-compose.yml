@@ -9,7 +9,7 @@ services:
             - jenkins:/var/jenkins_home/
 
     remote-host:
-        build: ./remote-host/.
+        build: ./remote_host/.
         volumes:
             - jenkins:/home/remote_user/jenkins/
             - ./remote-host/jobs/:/home/remote_user/jobs/
